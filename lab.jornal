@@ -1,0 +1,198 @@
+Лабораторный журнал
+
+---
+
+1. Создание проектной папки
+- Создана проектная папка:
+
+  cd название_папки
+
+
+---
+
+2. Скачивание и обработка данных
+- Файлы скачаны с сайта
+
+  wget ссылка
+
+- Разархивированы:
+
+  gunzip название_файла
+
+
+---
+
+3. Проверка данных
+- Проверены первые 20 строк на наличие ошибок:
+
+  head -20 название_файла
+
+- Использована команда `cat` для просмотра содержимого файла:
+
+  cat название_файла
+
+- Подсчитано количество строк в файлах:
+
+  wc -l amp_res_1.fastq  # 1823504 строки
+  wc -l amp_res_2.fastq  # 1823504 строки
+
+- Рассчитано количество операций чтения:
+  - Каждый файл FASTQ содержит 4 строки на один рид
+  - Количество ридов: `1823504 / 4 = 455876
+  
+Сответствует ли базовая статистика тому, что вы рассчитали для количества прочтений в прошлый раз? 
+Вывод из html файла: 455876 
+Ответ: да
+
+
+---
+
+4. Установка и использование SeqKit
+- Установлен SeqKit:
+
+  conda install -c bioconda seqkit
+
+- Проведён анализ файлов:
+
+  seqkit stat amp_res_1.fastq amp_res_2.fastq
+ 
+  Результат:
+
+  file             format  type  num_seqs     sum_len  min_len  avg_len  max_len
+  amp_res_1.fastq  FASTQ   DNA    455,876  46,043,476      101      101      101
+  amp_res_2.fastq  FASTQ   DNA    455,876  46,043,476      101      101      101
+
+
+---
+
+5. Анализ качества данных с помощью FastQC
+- Установлен FastQC:
+
+  conda install -c bioconda fastqc
+
+- Запущен анализ:
+  fastqc -o "/home/ann/genomic data analysis/Pr.2:antibiotic resistance" amp_res_1.fastq
+  fastqc -o "/home/ann/genomic data analysis/Pr.2:antibiotic resistance" amp_res_2.fastq
+  
+Результаты:
+  - Количество ридов: 455876(соответствует расчётам).
+  Ошибки:
+    - Качество падает к концу ридов (график Per base sequence quality).
+    - Медиана качества для некоторых позиций ниже 20 (Failure).
+    - Нижний квартиль (25%) для некоторых позиций ниже 10 (Warning).
+    
+Ошибка, которую видижу в FastQC, связана с качеством последовательностей (reads) в FASTQ-файле. FastQC анализирует качество оснований (base quality)
+ и выдаёт предупреждения или ошибки, если качество не соответствует определённым критериям.
+    Q-score ≥ 30 (зелёная зона): Очень хорошее качество (вероятность ошибки 1 на 1000)
+    Q-score 20–30 (оранжевая зона): Приемлемое качество (вероятность ошибки 1 на 100).
+    Q-score < 20 (красная зона): Плохое качество (вероятность ошибки выше 1 на 100).
+
+
+На графике Per base sequence quality видно, что качество падает к концу. Это можно связать с истощением реагентов, проблемы во время проведения секвенирования и тд.
+
+
+Как вы думаете, что нам следует делать с чем-либо,что FastQC посчитал необычным? - удалить или в дальнеших расчетах не брать последний "хвост" результатов
+
+---
+
+6. Обрезка данных (Trimming)
+- Скачан и установлен Trimmomatic:
+  wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.39.zip
+  unzip Trimmomatic-0.39.zip
+
+- Выполнена обрезка:
+  java -jar trimmomatic-0.39.jar PE \
+    -phred33 \
+    "/home/ann/genomic data analysis/Pr.2:antibiotic resistance/amp_res_1.fastq" \
+    "/home/ann/genomic data analysis/Pr.2:antibiotic resistance/amp_res_2.fastq" \
+    output_1_paired.fq output_1_unpaired.fq \
+    output_2_paired.fq output_2_unpaired.fq \
+    LEADING:20 TRAILING:20 SLIDINGWINDOW:10:20 MINLEN:20
+
+Результаты обрезки:
+  - Парные риды (forward): 446259
+  - Парные риды (reverse): 446259
+  - Синглтоны (forward): 9216
+  - Синглтоны (reverse): 273
+
+---
+
+7. Проверка качества после обрезки
+- Запущен FastQC на обрезанных файлах:
+
+  fastqc output_1_paired.fq output_2_paired.fq
+ 
+Качество данных улучшилось.
+
+---
+
+8. Выравнивание ридов на референсный геном**
+- Установлен BWA:
+
+  sudo apt update
+  sudo apt install bwa
+
+- Референсный геном проиндексирован:
+
+  bwa index GCF_000005845.2_ASM584v2_genomic.fna
+
+- Выполнено выравнивание:
+
+  bwa mem GCF_000005845.2_ASM584v2_genomic.fna output_1_paired.fq output_2_paired.fq > aligned_output.sam
+
+- Преобразование SAM в BAM:
+
+  samtools view -S -b aligned_output.sam > aligned_output.bam
+
+- Сортировка и индексация BAM:
+
+  samtools sort aligned_output.bam -o aligned_output_sorted.bam
+  samtools index aligned_output_sorted.bam
+
+-Статистика выравнивания:
+
+  892776 + 0 in total (QC-passed reads + QC-failed reads)
+  892518 + 0 primary
+  891649 + 0 mapped (99.87% : N/A)
+  891391 + 0 primary mapped (99.87% : N/A)
+  892518 + 0 paired in sequencing
+  446259 + 0 read1
+  446259 + 0 read2
+  888554 + 0 properly paired (99.56% : N/A)
+  890412 + 0 with itself and mate mapped
+  979 + 0 singletons (0.11% : N/A)
+
+
+---
+
+9. Вызов вариантов (Variant Calling)
+- Установлен VarScan:
+ 
+  conda install varscan
+
+- Создан файл mpileup:
+ 
+  samtools mpileup -f GCF_000005845.2_ASM584v2_genomic.fna aligned_output_sorted.bam > my.mpileup
+
+- Вызов вариантов:
+
+  varscan mpileup2snp my.mpileup --min-var-freq 0.50 --variants --output-vcf 1 > VarScan_results.vcf
+
+Результаты:
+  - Проанализировано оснований: 4,641,343
+  - Найдено вариантов: 6 SNP и 3 инделя
+  - В файл `VarScan_results.vcf` записано 6 SNP
+
+---
+
+10. Аннотация вариантов
+- Создана база данных для аннотации:
+
+  snpEff build -genbank -v k12
+
+- Выполнена аннотация:
+
+  snpEff ann -v k12 VarScan_results.vcf > VarScan_results_annotated.vcf
+
+
+
